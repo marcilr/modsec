@@ -1,0 +1,89 @@
+modsec-error-contact-page.txt
+Created Tue Feb  5 14:33:13 AKST 2019
+by Raymond E. Marcil <marcilr@gmail.com>
+
+
+At work a customer reported an error trying to submit an
+error message to the contact page:
+
+  102 - KETCHIKAN
+  Document Year:1973Number:001627Suffix:0
+  Date and Time Recorded:05/22/1973 03:28 PM
+  Book: 46 Page:270
+  Pages:3
+  Index:D - DEEDS
+  Description:W.DEED
+
+  The image for this Deed is missing the first page and the last page
+  of the next document.
+
+The submitted error message has a lot of items that could
+get filtered such as Number, Page, Index, and name value 
+pairs.
+
+Checking out the webprod server logs:
+
+# cd /etc/nginx/logs -> /var/log/nginx
+
+  or
+
+# cd /var/log/nginx/
+
+# grep KETCHIKAN modsec_audit.log
+ModSecurity: Warning. Matched "Operator `Rx' with parameter `(?i)(?:;|\{|\||\|\||&|&&|\n|\r|`)\s*[\(,@\'\"\s]*(?:[\w'\"\./]+/|[\\\\'\"\^]*\w[\\\\'\"\^]*:.*\\\\|[\^\.\w '\"/\\\\]*\\\\)?[\"\^]*(?:m[\"\^]*(?:y[\"\^]*s[\"\^]*q[\"\^]*l(?:[\"\^]*(?:d[\"\^]*u[\"\^]*m[ (4992 characters omitted)' against variable `ARGS:message' (Value: `102 - KETCHIKAN\x0d\x0aDocument Year:1973Number:001627Suffix:0\x0d\x0aDate and Time Recorded:05/22/1 (224 characters omitted)' ) [file "/etc/nginx/owasp-modsecurity-crs/rules/REQUEST-932-APPLICATION-ATTACK-RCE.conf"] [line "120"] [id "932110"] [rev "4"] [msg "Remote Command Execution: Windows Command Injection"] [data "Matched Data: \x0d\x0aDate and Time Recorded:05/22/1973 03:28 PM\x0d\x0aBook: 46Page:270\x0d\x0aPages:3\x0d\x0aIndex:D - DEEDS\x0d\x0aDescription:W. DEED\x0d\x0a\x0d\x0aThe image for this Deed is missing the first page and the last page is the first page of the next document found within ARGS:message: 102 - KETCHIKAN\x0d\x0aDocument Year:1973Number:001627Suffix:0\x0d\x0aDate and Time Recorded:05/22/1973 03:28 PM\x0d\x0aBook: 46Page:270\x0d\x0aPages:3\x0d\x0aIndex:D - DEEDS\x0d\x0aDescription:W. DEED\x0d\x0a\x0d\x0aThe image for this Deed is missing the first page and the last page is the first page of the next document."] [severity "2"] [ver "OWASP_CRS/3.0.0"] [maturity "9"] [accuracy "8"] [tag "application-multi"] [tag "language-shell"] [tag "platform-windows"] [tag "attack-rce"] [tag "OWASP_CRS/WEB_ATTACK/COMMAND_INJECTION"] [tag "WASCTC/WASC-31"] [tag "OWASP_TOP_10/A1"] [tag "PCI/6.5.2"] [hostname "208.87.233.201"] [uri "/shared/emailforms/processEmailContact.cfm"] [unique_id "154939837417.856367"] [ref "o56,219v1599,276"]
+#
+
+Note the above has id "932110" identifying the rule tripped and 
+"OWASP_CRS/WEB_ATTACK/COMMAND_INJECTION" describing a command injection attack.
+No doubt why it got flagged.
+
+The nginx configuration: 
+  /etc/nginx/conf.d/modsec_includes.conf
+
+Points to various /etc/nginx/owasp-modsecurity-crs/rules/ files. 
+Searching the rules for id "932110" reported in the logs:
+
+# pwd
+/etc/nginx/owasp-modsecurity-crs/rules
+[root@dnratwwebprod rules]# grep -nri "932110" *
+REQUEST-903.9001-DRUPAL-EXCLUSION-RULES.conf:332:# Rule Exclusion for ARGS:destination:       932110 RCE: Windows Command Inj.
+REQUEST-903.9001-DRUPAL-EXCLUSION-RULES.conf:357:        ctl:ruleRemoveTargetById=932110;ARGS:destination"
+REQUEST-932-APPLICATION-ATTACK-RCE.conf:152:#   cat regexp-932110.txt | ./regexp-cmdline.py windows | ./regexp-assemble.pl
+REQUEST-932-APPLICATION-ATTACK-RCE.conf:157:# [regexp assembled from util/regexp-assemble/regexp-932110.txt]
+REQUEST-932-APPLICATION-ATTACK-RCE.conf:171:	id:932110,\
+REQUEST-932-APPLICATION-ATTACK-RCE.conf:189:# For explanation of this rule, see rule 932110.
+REQUEST-932-APPLICATION-ATTACK-RCE.conf:198:# [regexp assembled from util/regexp-assemble/regexp-932110.txt]
+#
+
+# nano +171 REQUEST-932-APPLICATION-ATTACK-RCE.conf
+...
+   "msg:'Remote Command Execution: Windows Command Injection',\
+    phase:request,\
+    rev:'4',\
+    ver:'OWASP_CRS/3.0.0',\
+    maturity:'9',\
+    accuracy:'8',\
+    capture,\
+    t:none,\
+    ctl:auditLogParts=+E,\
+    block,\
+    id:932110,\
+    tag:'application-multi',\
+    tag:'language-shell',\
+    tag:'platform-windows',\
+    tag:'attack-rce',\
+    tag:'OWASP_CRS/WEB_ATTACK/COMMAND_INJECTION',\
+    tag:'WASCTC/WASC-31',\
+    tag:'OWASP_TOP_10/A1',\
+    tag:'PCI/6.5.2',\
+    logdata:'Matched Data: %{TX.0} found within %{MATCHED_VAR_NAME}: %{MATCHED_VAR}',\
+    severity:'CRITICAL',\
+    setvar:'tx.msg=%{rule.msg}',\
+    setvar:tx.rce_score=+%{tx.critical_anomaly_score},\
+    setvar:tx.anomaly_score=+%{tx.critical_anomaly_score},\
+    setvar:tx.%{rule.id}-OWASP_CRS/WEB_ATTACK/RCE-%{matched_var_name}=%{tx.0}"
+...
+
+The id "932110" certainly shows the query flagged as a
+'Remote Command Execution: Windows Command Injection'
+
